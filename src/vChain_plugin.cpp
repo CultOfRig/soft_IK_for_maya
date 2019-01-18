@@ -46,9 +46,7 @@ Redistribution and use in source and binary forms, with or without modification,
 MStatus initializePlugin(MObject pluginMob)
 {
     MStatus status;
-    MFnPlugin fn(pluginMob);
-
-    status = fn.setName("cor_solvers_ik");
+    MFnPlugin fn(pluginMob, "Raffaele Fragapane", "1.0.0", "20160000", &status);
 
     status = fn.registerNode(k_vchain_soft_name, k_vchain_soft_id,
                              &VChain_soft::creator, &VChain_soft::initialize,
@@ -59,11 +57,11 @@ MStatus initializePlugin(MObject pluginMob)
 
 
 #if MAYA_API_VERSION < 20180000
-#ifdef _WIN64
-    __declspec(dllexport)
-#elif __linux__
-    __attribute__((visibility("default")))
-#endif
+    #ifdef _WIN64
+        __declspec(dllexport)
+    #elif __linux__
+        __attribute__((visibility("default")))
+    #endif
 #endif
 MStatus uninitializePlugin(MObject pluginMob)
 {

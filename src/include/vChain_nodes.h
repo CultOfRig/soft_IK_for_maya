@@ -57,7 +57,7 @@ static const int k_vchain_soft_id = 0x0012a040;
 static const char* k_vchain_soft_name = "cor_vChain_multi_solve";
 
 
-static const uint32_t k_output_count = 6;
+static const uint32_t k_output_count = 7;
 const MFloatMatrix k_mtx44f_id = MFloatMatrix();
 
 

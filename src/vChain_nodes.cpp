@@ -104,7 +104,7 @@ MStatus VChain_soft::initialize()
 
     // lengths
     in_length1 = n_attr.create("length1", "length1",
-                               MFnNumericData::kFloat, 2.f,
+                               MFnNumericData::kFloat, 6.f,
                                &status);
     n_attr.setSoftMin(.5f); n_attr.setSoftMax(10.f);
     n_attr.setMin(.05f);
@@ -112,7 +112,7 @@ MStatus VChain_soft::initialize()
     n_attr.setWritable(true);
 
     in_length2 = n_attr.create("length2", "length2",
-                               MFnNumericData::kFloat, 2.f,
+                               MFnNumericData::kFloat, 4.f,
                                &status);
     n_attr.setSoftMin(.5f); n_attr.setSoftMax(10.f);
     n_attr.setMin(.05f);
@@ -120,7 +120,7 @@ MStatus VChain_soft::initialize()
     n_attr.setWritable(true);
 
     in_max_compression = n_attr.create("max_compression_ratio", "max_compression_ratio",
-                                       MFnNumericData::kFloat, 0.f,
+                                       MFnNumericData::kFloat, 0.1f,
                                        &status);
     n_attr.setSoftMin(.05f);
     n_attr.setMin(.0f); n_attr.setMax(1.f);
@@ -128,7 +128,7 @@ MStatus VChain_soft::initialize()
     n_attr.setWritable(true);
 
     in_min_extension = n_attr.create("min_extension_ratio", "min_extension_ratio",
-                                     MFnNumericData::kFloat, 0.9f,
+                                     MFnNumericData::kFloat, 0.98f,
                                      &status);
     n_attr.setSoftMin(.8f);
     n_attr.setMin(.0f); n_attr.setMax(1.f);
@@ -136,7 +136,7 @@ MStatus VChain_soft::initialize()
     n_attr.setWritable(true);
 
     in_max_extension = n_attr.create("max_extension_ratio", "max_extension_ratio",
-                                     MFnNumericData::kFloat, 1.1f,
+                                     MFnNumericData::kFloat, 1.05f,
                                      &status);
     n_attr.setSoftMax(2.f);
     n_attr.setMin(1.f);
@@ -247,8 +247,7 @@ void result_from_triangle_hierarchical(const Triangle* const solution,
                                        const MFloatMatrix& mtx_handle,
                                        std::vector<MFloatMatrix>& mtx44fa_result) // output argument
 {
-    { // zeroth
-      // this is going to be the plain IK basis
+    { // zeroth - The plain IK basis
         mtx44fa_result[0] = mtx_basis;
     }
 
@@ -266,39 +265,49 @@ void result_from_triangle_hierarchical(const Triangle* const solution,
         mtx44fa_result[2][3][0] = solution->a;
     }
 
-
+    // We split the rotation over two joints, so we want half of it to work with
+    //   and we scope up for it to be shared
+    const double gamma_complement_half = (solution->gamma - M_PI)*0.5;
+    const double cos_gamma_complement_half = std::cos(gamma_complement_half);
+    const double sin_gamma_complement_half = std::sin(gamma_complement_half);
     { // third joint
-        const double gamma_complement = solution->gamma - M_PI;
-        const double cos_gamma_complement = std::cos(gamma_complement);
-        const double sin_gamma_complement = std::sin(gamma_complement);
-
         MFloatMatrix mtx_local(k_mtx44f_id);
 
-        mtx_local[0][0] = cos_gamma_complement; mtx_local[0][1] = sin_gamma_complement;
-        mtx_local[1][0] = -sin_gamma_complement; mtx_local[1][1] = cos_gamma_complement;
+        mtx_local[0][0] = cos_gamma_complement_half; mtx_local[0][1] = sin_gamma_complement_half;
+        mtx_local[1][0] = -sin_gamma_complement_half; mtx_local[1][1] = cos_gamma_complement_half;
 
         mtx44fa_result[3] = mtx_local;
     }
 
-    { // fourth joint
-        MFloatMatrix mtx_local = k_mtx44f_id;
 
-        mtx_local[3][0] = solution->b;
+    { // fourth joint
+        MFloatMatrix mtx_local(k_mtx44f_id);
+
+        mtx_local[0][0] =  cos_gamma_complement_half; mtx_local[0][1] = sin_gamma_complement_half;
+        mtx_local[1][0] = -sin_gamma_complement_half; mtx_local[1][1] = cos_gamma_complement_half;
 
         mtx44fa_result[4] = mtx_local;
     }
 
     { // fifth joint
+        MFloatMatrix mtx_local = k_mtx44f_id;
+
+        mtx_local[3][0] = solution->b;
+
+        mtx44fa_result[5] = mtx_local;
+    }
+
+    { // sixth joint
         MFloatMatrix mtx_angle_comp(k_mtx44f_id); // realigns the last joint to the basis
         mtx_angle_comp[0][0] = +solution->cos_alpha; mtx_angle_comp[0][1] = +solution->sin_alpha;
         mtx_angle_comp[1][0] = -solution->sin_alpha; mtx_angle_comp[1][1] = +solution->cos_alpha;
         // Transpose here is a cheap inversion because we only care
         //   about the rotation part of the matrix and we know it to be orthonormal
-        mtx44fa_result[5] = mtx_handle * mtx_basis.transpose() * mtx_angle_comp;
+        mtx44fa_result[6] = mtx_handle * mtx_basis.transpose() * mtx_angle_comp;
 
-        mtx44fa_result[5][3][0] = 0.f;
-        mtx44fa_result[5][3][1] = 0.f;
-        mtx44fa_result[5][3][2] = 0.f;
+        mtx44fa_result[6][3][0] = 0.f;
+        mtx44fa_result[6][3][1] = 0.f;
+        mtx44fa_result[6][3][2] = 0.f;
     }
 }
 
@@ -332,53 +341,73 @@ void result_from_triangle_flat(const Triangle* const solution,
         mtx44fa_result[1] = mtx_local * mtx_basis;
     }
 
+    // Not scoped down to transform locality because the next three transforms all sit here
+    const float mid_pos_x = solution->cos_beta * solution->a;
+    const float mid_pos_y = solution->sin_beta * solution->a;
+
     { // second joint
         MFloatMatrix mtx_local(k_mtx44f_id);
         // orientation
         mtx_local[0][0] = solution->cos_beta; mtx_local[0][1] = solution->sin_beta;
         mtx_local[1][0] = -solution->sin_beta; mtx_local[1][1] = solution->cos_beta;
         // position
-        mtx_local[3][0] = solution->cos_beta * solution->a;
-        mtx_local[3][1] = solution->sin_beta * solution->a;
+        mtx_local[3][0] = mid_pos_x;
+        mtx_local[3][1] = mid_pos_y;
 
         mtx44fa_result[2] = mtx_local * mtx_basis;
     }
 
-    // Not scoped super-locally because it's used for a couple joints in a row
+    // Not scoped down to transform locality because it's used across multiple transforms
     const double gamma_complement = solution->gamma + solution->beta - M_PI;
-    const double cos_gamma_complement = std::cos(gamma_complement);
-    const double sin_gamma_complement = std::sin(gamma_complement);
-
     { // third joint
+        const double gamma_complement_half = gamma_complement * 0.5;
+        const double cos_gamma_complement_half = std::cos(gamma_complement_half);
+        const double sin_gamma_complement_half = std::sin(gamma_complement_half);
+
         MFloatMatrix mtx_local(k_mtx44f_id);
 
-        mtx_local[0][0] = cos_gamma_complement; mtx_local[0][1] = sin_gamma_complement;
-        mtx_local[1][0] = -sin_gamma_complement; mtx_local[1][1] = cos_gamma_complement;
+        mtx_local[0][0] =  cos_gamma_complement_half; mtx_local[0][1] = sin_gamma_complement_half;
+        mtx_local[1][0] = -sin_gamma_complement_half; mtx_local[1][1] = cos_gamma_complement_half;
 
-        // position, same as previous joint
-        mtx_local[3][0] = solution->cos_beta * solution->a;
-        mtx_local[3][1] = solution->sin_beta * solution->a;
+        mtx_local[3][0] = mid_pos_x;
+        mtx_local[3][1] = mid_pos_y;
 
         mtx44fa_result[3] = mtx_local * mtx_basis;
     }
 
+    // Not scoped down to transform locality because it's used across multiple transforms
+    const double cos_gamma_complement = std::cos(gamma_complement);
+    const double sin_gamma_complement = std::sin(gamma_complement);
     { // fourth joint
-        MFloatMatrix mtx_local = k_mtx44f_id;
-        // orientation, same as previous joint
-        mtx_local[0][0] = cos_gamma_complement; mtx_local[0][1] = sin_gamma_complement;
+        MFloatMatrix mtx_local(k_mtx44f_id);
+
+        mtx_local[0][0] =  cos_gamma_complement; mtx_local[0][1] = sin_gamma_complement;
         mtx_local[1][0] = -sin_gamma_complement; mtx_local[1][1] = cos_gamma_complement;
 
-        mtx_local[3][0] = solution->c;
+        // position, same as previous joint
+        mtx_local[3][0] = mid_pos_x;
+        mtx_local[3][1] = mid_pos_y;
 
         mtx44fa_result[4] = mtx_local * mtx_basis;
     }
 
     { // fifth joint
-        mtx44fa_result[5] = mtx_handle;
+        MFloatMatrix mtx_local = k_mtx44f_id;
+        // orientation, same as previous joint
+        mtx_local[0][0] =  cos_gamma_complement; mtx_local[0][1] = sin_gamma_complement;
+        mtx_local[1][0] = -sin_gamma_complement; mtx_local[1][1] = cos_gamma_complement;
 
-        mtx44fa_result[5][3][0] = mtx_basis[3][0] + mtx_basis[0][0] * solution->c;
-        mtx44fa_result[5][3][1] = mtx_basis[3][1] + mtx_basis[0][1] * solution->c;
-        mtx44fa_result[5][3][2] = mtx_basis[3][2] + mtx_basis[0][2] * solution->c;
+        mtx_local[3][0] = solution->c;
+
+        mtx44fa_result[5] = mtx_local * mtx_basis;
+    }
+
+    { // sixth joint
+        mtx44fa_result[6] = mtx_handle;
+
+        mtx44fa_result[6][3][0] = mtx_basis[3][0] + mtx_basis[0][0] * solution->c;
+        mtx44fa_result[6][3][1] = mtx_basis[3][1] + mtx_basis[0][1] * solution->c;
+        mtx44fa_result[6][3][2] = mtx_basis[3][2] + mtx_basis[0][2] * solution->c;
     }
 }
 
@@ -472,14 +501,14 @@ MStatus VChain_soft::compute(const MPlug & plug, MDataBlock & data_block)
     //      beta
     rigid_tri.cos_beta = rigid_tri.a < 0.00001f ? 0.f : // defending against a div by 0
         ((rigid_tri.a * rigid_tri.a) + (rigid_tri.c * rigid_tri.c) - (rigid_tri.b * rigid_tri.b)) /
-                            (2.f * rigid_tri.a * rigid_tri.c);
+                                (2.f * rigid_tri.a * rigid_tri.c);
     rigid_tri.beta = std::acosf(rigid_tri.cos_beta);
     rigid_tri.sin_beta = std::sin(rigid_tri.beta);
 
     //      gamma
     rigid_tri.cos_gamma = rigid_tri.c < 0.00001f ? 1.f : // defending against a div by 0
         ((rigid_tri.a * rigid_tri.a) + (rigid_tri.b * rigid_tri.b) - (rigid_tri.c * rigid_tri.c)) /
-                            (2.f * rigid_tri.a * rigid_tri.b);
+                                (2.f * rigid_tri.a * rigid_tri.b);
     rigid_tri.gamma = std::acosf(rigid_tri.cos_gamma);
     rigid_tri.sin_gamma = std::sin(rigid_tri.gamma);
 
@@ -591,8 +620,6 @@ MStatus VChain_soft::compute(const MPlug & plug, MDataBlock & data_block)
     }
 
     //  ------- Result -------
-    // Transpose here is a cheap inversion because we only care
-    //   about the rotation part of the matrix and we know it to be orthonormal
     const bool hrc_mode = data_block.inputValue(in_hierarchical_mode).asBool();
 
     if (hrc_mode)
