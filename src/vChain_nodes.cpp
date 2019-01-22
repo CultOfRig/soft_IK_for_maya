@@ -360,7 +360,7 @@ void result_from_triangle_flat(const Triangle* const solution,
     // Not scoped down to transform locality because it's used across multiple transforms
     const double gamma_complement = solution->gamma + solution->beta - M_PI;
     { // third joint
-        const double gamma_complement_half = gamma_complement * 0.5;
+        const double gamma_complement_half = (gamma_complement + solution->beta) * 0.5;
         const double cos_gamma_complement_half = std::cos(gamma_complement_half);
         const double sin_gamma_complement_half = std::sin(gamma_complement_half);
 
